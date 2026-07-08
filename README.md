@@ -1,6 +1,6 @@
 # Model Clash — AI Debate Arena
 
-# (https://thetruthcomesout.vercel.app/)
+# https://thetruthcomesout.vercel.app
 
 Pit **OpenAI**, **Claude**, **Grok**, and **Gemini** against each other in multi-round debates. You bring the API keys; the app shuffles speaking order and lets each model respond to the full transcript so far.
 
