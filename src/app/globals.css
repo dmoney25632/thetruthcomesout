@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+:root {
+  --arena-bg: #f4f1ec;
+  --background: #f4f1ec;
+  --foreground: #1c1917;
+  --gpt: #0d9488;
+  --claude: #7c3aed;
+  --grok: #ea580c;
+  --gemini: #2563eb;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
+}
+
+body {
+  background: var(--arena-bg);
+  color: var(--foreground);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+}
+
+/* Subtle scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a29e;
+}
+
+/* Motion */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(28, 25, 23, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(28, 25, 23, 0);
+  }
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-soft-pulse {
+  animation: soft-pulse 1.6s ease-in-out infinite;
+}
+
+.typing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  animation: typing-bounce 1.1s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Arena atmosphere */
+.arena-glow {
+  background-image:
+    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(234, 88, 12, 0.08), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 0% 80%, rgba(124, 58, 237, 0.06), transparent 50%),
+    radial-gradient(ellipse 50% 40% at 100% 70%, rgba(13, 148, 136, 0.07), transparent 50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-soft-pulse,
+  .typing-dot {
+    animation: none !important;
+  }
+}
