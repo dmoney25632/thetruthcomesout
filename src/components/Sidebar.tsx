@@ -1,8 +1,12 @@
 "use client";
 
 import type { ApiKeys, DebateSettings, ModelConfig } from "@/lib/types";
-import { MAX_ROUNDS } from "@/lib/types";
-import { PROVIDER_META } from "@/lib/models";
+import {
+  MAX_ROUNDS,
+  MAX_WORD_LIMIT,
+  MIN_WORD_LIMIT,
+} from "@/lib/types";
+import { MODEL_OPTIONS, PROVIDER_META } from "@/lib/models";
 import { estimateTokens } from "@/lib/utils";
 import { ModelAvatar } from "./ModelAvatar";
 import {
@@ -189,7 +193,8 @@ export function Sidebar({
                   Demo / cheap mode
                 </div>
                 <p className="text-[11px] leading-relaxed text-stone-500">
-                  Lowest-cost models. Recommended while testing.
+                  Locks each provider to its cheapest model. Turn off to pick
+                  freely.
                 </p>
               </div>
               <button
@@ -240,25 +245,28 @@ export function Sidebar({
             </div>
             <div className="space-y-1.5">
               <label
-                htmlFor="charLimit"
+                htmlFor="wordLimit"
                 className="text-xs font-semibold uppercase tracking-wider text-stone-500"
               >
-                Char limit
+                Word limit
               </label>
               <input
-                id="charLimit"
+                id="wordLimit"
                 type="number"
-                min={50}
-                max={4000}
-                step={50}
-                value={settings.charLimit}
+                min={MIN_WORD_LIMIT}
+                max={MAX_WORD_LIMIT}
+                step={10}
+                value={settings.wordLimit}
                 disabled={isRunning}
                 onChange={(e) =>
                   setSettings((s) => ({
                     ...s,
-                    charLimit: Math.min(
-                      4000,
-                      Math.max(50, Number(e.target.value) || 50)
+                    wordLimit: Math.min(
+                      MAX_WORD_LIMIT,
+                      Math.max(
+                        MIN_WORD_LIMIT,
+                        Number(e.target.value) || MIN_WORD_LIMIT
+                      )
                     ),
                   }))
                 }
@@ -266,6 +274,10 @@ export function Sidebar({
               />
             </div>
           </section>
+          <p className="-mt-3 text-[11px] leading-relaxed text-stone-400">
+            Soft max per turn — models may use fewer words. They won&apos;t pad
+            to fill it.
+          </p>
 
           <section className="space-y-3">
             <div className="flex items-baseline justify-between">
@@ -277,56 +289,72 @@ export function Sidebar({
               </span>
             </div>
             <ul className="space-y-2">
-              {models.map((m) => (
-                <li
-                  key={m.id}
-                  className="rounded-xl border border-stone-200 bg-stone-50/80 p-3"
-                  style={{ borderLeftWidth: 3, borderLeftColor: m.color }}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <input
-                      type="checkbox"
-                      id={`model-${m.id}`}
-                      checked={m.enabled}
-                      disabled={isRunning}
-                      onChange={(e) =>
-                        updateModel(m.id, { enabled: e.target.checked })
-                      }
-                      className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-                    />
-                    <ModelAvatar
-                      provider={m.provider}
-                      color={m.color}
-                      size="sm"
-                    />
-                    <label
-                      htmlFor={`model-${m.id}`}
-                      className="flex-1 text-sm font-medium text-stone-800"
+              {models.map((m) => {
+                const options = MODEL_OPTIONS[m.provider];
+                const known = options.some((o) => o.id === m.modelName);
+                return (
+                  <li
+                    key={m.id}
+                    className="rounded-xl border border-stone-200 bg-stone-50/80 p-3"
+                    style={{ borderLeftWidth: 3, borderLeftColor: m.color }}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="checkbox"
+                        id={`model-${m.id}`}
+                        checked={m.enabled}
+                        disabled={isRunning}
+                        onChange={(e) =>
+                          updateModel(m.id, { enabled: e.target.checked })
+                        }
+                        className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                      />
+                      <ModelAvatar
+                        provider={m.provider}
+                        color={m.color}
+                        size="sm"
+                      />
+                      <label
+                        htmlFor={`model-${m.id}`}
+                        className="flex-1 text-sm font-medium text-stone-800"
+                      >
+                        {m.label}
+                        <span className="ml-1.5 text-xs font-normal text-stone-400">
+                          {PROVIDER_META[m.provider].name}
+                        </span>
+                      </label>
+                    </div>
+                    <select
+                      value={m.modelName}
+                      disabled={isRunning || !m.enabled || settings.demoMode}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        const opt = options.find((o) => o.id === next);
+                        updateModel(m.id, {
+                          modelName: next,
+                          costTier: opt?.tier ?? "standard",
+                        });
+                      }}
+                      className="mt-2 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs text-stone-700 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200 disabled:opacity-50"
+                      aria-label={`${m.label} model`}
                     >
-                      {m.label}
-                      <span className="ml-1.5 text-xs font-normal text-stone-400">
-                        {PROVIDER_META[m.provider].name}
-                      </span>
-                    </label>
-                  </div>
-                  <input
-                    type="text"
-                    value={m.modelName}
-                    disabled={isRunning || !m.enabled || settings.demoMode}
-                    onChange={(e) =>
-                      updateModel(m.id, {
-                        modelName: e.target.value,
-                        costTier: "standard",
-                      })
-                    }
-                    placeholder={
-                      settings.demoMode ? m.demoModel : m.premiumModel
-                    }
-                    className="mt-2 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 font-mono text-xs text-stone-700 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200 disabled:opacity-50"
-                    aria-label={`${m.label} model name`}
-                  />
-                </li>
-              ))}
+                      {!known && (
+                        <option value={m.modelName}>{m.modelName}</option>
+                      )}
+                      {options.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                          {o.tier === "demo"
+                            ? " · cheap"
+                            : o.tier === "premium"
+                              ? " · premium"
+                              : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </li>
+                );
+              })}
             </ul>
           </section>
 

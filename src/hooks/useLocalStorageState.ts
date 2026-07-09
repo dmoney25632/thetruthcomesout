@@ -2,8 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ApiKeys, DebateSettings, ModelConfig } from "@/lib/types";
-import { DEFAULT_CHAR_LIMIT, STORAGE_KEYS } from "@/lib/types";
-import { DEFAULT_MODELS, DEMO_MODELS, PREMIUM_MODELS } from "@/lib/models";
+import {
+  DEFAULT_WORD_LIMIT,
+  MAX_ROUNDS,
+  MAX_WORD_LIMIT,
+  MIN_WORD_LIMIT,
+  STORAGE_KEYS,
+} from "@/lib/types";
+import {
+  DEFAULT_MODELS,
+  DEMO_MODELS,
+  MODEL_ID_MIGRATIONS,
+  PREMIUM_MODELS,
+} from "@/lib/models";
 
 const EMPTY_KEYS: ApiKeys = {
   openai: "",
@@ -15,7 +26,7 @@ const EMPTY_KEYS: ApiKeys = {
 const DEFAULT_SETTINGS: DebateSettings = {
   prompt: "",
   rounds: 2,
-  charLimit: DEFAULT_CHAR_LIMIT,
+  wordLimit: DEFAULT_WORD_LIMIT,
   demoMode: true,
 };
 
@@ -26,6 +37,36 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function migrateModelName(name: string | undefined, fallback: string): string {
+  if (!name) return fallback;
+  return MODEL_ID_MIGRATIONS[name] ?? name;
+}
+
+/** Migrate older settings that used charLimit. */
+function migrateSettings(
+  stored: DebateSettings & { charLimit?: number }
+): DebateSettings {
+  const wordLimit =
+    typeof stored.wordLimit === "number"
+      ? stored.wordLimit
+      : typeof stored.charLimit === "number"
+        ? Math.min(
+            MAX_WORD_LIMIT,
+            Math.max(MIN_WORD_LIMIT, Math.round(stored.charLimit / 5))
+          )
+        : DEFAULT_WORD_LIMIT;
+
+  return {
+    prompt: stored.prompt ?? "",
+    rounds: Math.min(MAX_ROUNDS, Math.max(1, stored.rounds ?? 2)),
+    wordLimit: Math.min(
+      MAX_WORD_LIMIT,
+      Math.max(MIN_WORD_LIMIT, wordLimit)
+    ),
+    demoMode: stored.demoMode ?? true,
+  };
 }
 
 /** Merge stored models with current defaults so new fields (demoModel, etc.) appear. */
@@ -42,7 +83,7 @@ function mergeModels(stored: ModelConfig[]): ModelConfig[] {
       demoModel: def.demoModel,
       premiumModel: def.premiumModel,
       defaultModel: def.defaultModel,
-      modelName: prev.modelName || def.modelName,
+      modelName: migrateModelName(prev.modelName, def.modelName),
       enabled: prev.enabled,
     };
   });
@@ -68,13 +109,20 @@ export function useLocalStorageState() {
       DEFAULT_SETTINGS
     );
 
+    const mergedModels = mergeModels(storedModels);
+    const nextSettings = migrateSettings(storedSettings);
+
     setApiKeys(storedKeys);
-    setModels(mergeModels(storedModels));
-    setSettings({
-      ...DEFAULT_SETTINGS,
-      ...storedSettings,
-      demoMode: storedSettings.demoMode ?? true,
-    });
+    setModels(
+      nextSettings.demoMode
+        ? mergedModels.map((m) => ({
+            ...m,
+            modelName: m.demoModel || DEMO_MODELS[m.provider],
+            costTier: "demo" as const,
+          }))
+        : mergedModels
+    );
+    setSettings(nextSettings);
     setHydrated(true);
   }, []);
 

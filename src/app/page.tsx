@@ -98,13 +98,13 @@ export default function HomePage() {
         order: data.order,
         rounds: data.rounds,
         prompt: data.prompt,
-        charLimit: data.charLimit,
+        wordLimit: data.wordLimit,
       });
       setSettings((s) => ({
         ...s,
         prompt: data.prompt,
         rounds: data.rounds,
-        charLimit: data.charLimit,
+        wordLimit: data.wordLimit,
       }));
     })();
     return () => {
@@ -119,7 +119,7 @@ export default function HomePage() {
     if (!s) return;
     const t = window.setTimeout(() => {
       void writeShareUrl(
-        buildExportPayload(s.prompt, s.rounds, s.charLimit, order, messages)
+        buildExportPayload(s.prompt, s.rounds, s.wordLimit, order, messages)
       ).catch(() => {
         /* ignore oversized */
       });
@@ -165,7 +165,7 @@ export default function HomePage() {
     if (!s || messages.length === 0) return;
     try {
       const url = await writeShareUrl(
-        buildExportPayload(s.prompt, s.rounds, s.charLimit, order, messages)
+        buildExportPayload(s.prompt, s.rounds, s.wordLimit, order, messages)
       );
       await navigator.clipboard.writeText(url);
       setShareState("copied");

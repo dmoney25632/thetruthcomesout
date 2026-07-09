@@ -25,7 +25,8 @@ function redact(text: string): string {
     .replace(/sk-[a-zA-Z0-9_-]+/g, "[redacted]")
     .replace(/sk-ant-[a-zA-Z0-9_-]+/g, "[redacted]")
     .replace(/xai-[a-zA-Z0-9_-]+/g, "[redacted]")
-    .replace(/AIza[a-zA-Z0-9_-]+/g, "[redacted]");
+    .replace(/AIza[a-zA-Z0-9_-]+/g, "[redacted]")
+    .replace(/AQ\.[a-zA-Z0-9_-]+/g, "[redacted]");
 }
 
 function extractStatus(err: unknown): number | undefined {
@@ -114,7 +115,7 @@ export function classifyProviderError(err: unknown): ProviderError {
 
   if (/timeout|timed out|deadline|ETIMEDOUT|AbortError/.test(lower)) {
     return new ProviderError(
-      "Request timed out — try fewer rounds or a shorter char limit.",
+      "Request timed out — try fewer rounds or a shorter word limit.",
       "timeout",
       status
     );

@@ -8,8 +8,13 @@ import type {
   ModelConfig,
   StreamEvent,
 } from "@/lib/types";
-import { MAX_ROUNDS } from "@/lib/types";
-import { shuffle } from "@/lib/utils";
+import {
+  DEFAULT_WORD_LIMIT,
+  MAX_ROUNDS,
+  MAX_WORD_LIMIT,
+  MIN_WORD_LIMIT,
+} from "@/lib/types";
+import { shuffle, sleep } from "@/lib/utils";
 import {
   buildExportPayload,
   exportAsJson,
@@ -20,12 +25,29 @@ function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Slow the visible stream so readers can keep up. */
+async function pacedToken(
+  text: string,
+  onToken: (text: string) => void,
+  shouldStop: () => boolean
+) {
+  // Chunk by ~words so pacing feels natural
+  const parts = text.match(/\S+\s*/g) ?? [text];
+  for (const part of parts) {
+    if (shouldStop()) return;
+    onToken(part);
+    // ~28–40 wpm reading feel for short bursts; clamp for long chunks
+    const delay = Math.min(90, Math.max(28, part.length * 6));
+    await sleep(delay);
+  }
+}
+
 async function readSseTurn(
   res: Response,
-  onToken: (text: string) => void
+  onToken: (text: string) => void,
+  shouldStop: () => boolean
 ): Promise<{ content: string; error?: string; errorCode?: string }> {
   if (!res.body) {
-    // Fallback: non-streaming JSON
     const data = await res.json();
     if (data.error) {
       return { content: "", error: data.error, errorCode: data.errorCode };
@@ -41,6 +63,7 @@ async function readSseTurn(
   let errorCode: string | undefined;
 
   while (true) {
+    if (shouldStop()) break;
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -65,10 +88,17 @@ async function readSseTurn(
       }
 
       if (event.type === "token") {
-        content += event.text;
-        onToken(event.text);
+        await pacedToken(
+          event.text,
+          (piece) => {
+            content += piece;
+            onToken(piece);
+          },
+          shouldStop
+        );
       } else if (event.type === "done") {
-        content = event.content || content;
+        // Server final (word-truncated) wins over paced stream buffer
+        if (event.content) content = event.content;
       } else if (event.type === "error") {
         error = event.error;
         errorCode = event.errorCode;
@@ -95,7 +125,7 @@ export function useDebate() {
   const lastSettingsRef = useRef<{
     prompt: string;
     rounds: number;
-    charLimit: number;
+    wordLimit: number;
   } | null>(null);
 
   const stop = useCallback(() => {
@@ -113,13 +143,14 @@ export function useDebate() {
     (settings: DebateSettings, models: ModelConfig[]) => {
       const enabled = models.filter((m) => m.enabled);
       const rounds = Math.min(MAX_ROUNDS, Math.max(1, settings.rounds));
+      const avgChars = settings.wordLimit * 5;
       let total = 0;
       let historyChars = settings.prompt.length;
       for (let r = 0; r < rounds; r++) {
         for (let i = 0; i < enabled.length; i++) {
           total += Math.ceil(historyChars / 4);
-          total += Math.ceil(settings.charLimit / 4);
-          historyChars += settings.charLimit + 80;
+          total += Math.ceil(avgChars / 4);
+          historyChars += avgChars + 80;
         }
       }
       return total;
@@ -144,6 +175,10 @@ export function useDebate() {
       }
 
       const rounds = Math.min(MAX_ROUNDS, Math.max(1, settings.rounds));
+      const wordLimit = Math.min(
+        MAX_WORD_LIMIT,
+        Math.max(MIN_WORD_LIMIT, settings.wordLimit)
+      );
       const shuffled = shuffle(enabled);
       abortRef.current = false;
       const controller = new AbortController();
@@ -159,7 +194,7 @@ export function useDebate() {
       lastSettingsRef.current = {
         prompt: settings.prompt.trim(),
         rounds,
-        charLimit: settings.charLimit,
+        wordLimit,
       };
 
       const promptMsg: DebateMessage = {
@@ -187,7 +222,6 @@ export function useDebate() {
             setCurrentSpeakerModel(model);
 
             const msgId = uid();
-            // Brief "typing" beat before the stream starts — feels live
             const typingPlaceholder: DebateMessage = {
               id: msgId,
               role: "assistant",
@@ -205,13 +239,13 @@ export function useDebate() {
             transcript = [...transcript, typingPlaceholder];
             setMessages(transcript);
 
-            await new Promise((r) => setTimeout(r, 450));
+            // Beat before the stream — room to read the previous turn
+            await sleep(1200);
             if (abortRef.current) break;
 
-            const modelId =
-              settings.demoMode
-                ? model.demoModel || model.modelName
-                : model.modelName || model.defaultModel;
+            const modelId = settings.demoMode
+              ? model.demoModel || model.modelName
+              : model.modelName || model.defaultModel;
 
             let turnContent = "";
             let turnError: string | undefined;
@@ -226,30 +260,31 @@ export function useDebate() {
                   model: modelId,
                   apiKey: apiKeys[model.provider],
                   messages: apiHistory,
-                  charLimit: settings.charLimit,
+                  wordLimit,
                   speakerLabel: `${model.label} (${modelId})`,
                   stream: true,
                 }),
               });
 
-              // Non-SSE error (validation) before stream starts
               const contentType = res.headers.get("content-type") ?? "";
               if (!contentType.includes("text/event-stream")) {
                 const data = await res.json().catch(() => ({}));
-                turnError =
-                  data.error ||
-                  `Request failed (${res.status})`;
+                turnError = data.error || `Request failed (${res.status})`;
               } else {
-                const result = await readSseTurn(res, (text) => {
-                  turnContent += text;
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === msgId
-                        ? { ...m, content: turnContent, streaming: true }
-                        : m
-                    )
-                  );
-                });
+                const result = await readSseTurn(
+                  res,
+                  (text) => {
+                    turnContent += text;
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === msgId
+                          ? { ...m, content: turnContent, streaming: true }
+                          : m
+                      )
+                    );
+                  },
+                  () => abortRef.current
+                );
 
                 if (result.error) {
                   turnError = result.error;
@@ -257,13 +292,31 @@ export function useDebate() {
                 } else {
                   turnContent = result.content || turnContent;
                 }
+
+                // Sync UI to final server content (may differ from paced buffer)
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === msgId
+                      ? {
+                          ...m,
+                          content: turnContent,
+                          streaming: !turnError && !!turnContent,
+                        }
+                      : m
+                  )
+                );
               }
             } catch (err) {
-              if (abortRef.current || (err instanceof DOMException && err.name === "AbortError")) {
+              if (
+                abortRef.current ||
+                (err instanceof DOMException && err.name === "AbortError")
+              ) {
                 break;
               }
               turnError =
-                err instanceof Error ? err.message : "Network error calling provider";
+                err instanceof Error
+                  ? err.message
+                  : "Network error calling provider";
             }
 
             if (abortRef.current) {
@@ -306,12 +359,21 @@ export function useDebate() {
                 : `[${model.label}]: ${turnContent}`,
             });
 
-            // Rough token tally from chars for UI
             if (!failed) {
               setTotalTokensUsed((t) => t + Math.ceil(turnContent.length / 4));
             }
+
+            // Pause after each turn so the last lines can be read
+            if (!abortRef.current) {
+              await sleep(1800);
+            }
           }
           if (abortRef.current) break;
+
+          // Extra breath between rounds
+          if (round < rounds && !abortRef.current) {
+            await sleep(2200);
+          }
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
@@ -330,7 +392,12 @@ export function useDebate() {
   const loadMessages = useCallback(
     (
       next: DebateMessage[],
-      meta?: { order?: string[]; rounds?: number; prompt?: string; charLimit?: number }
+      meta?: {
+        order?: string[];
+        rounds?: number;
+        prompt?: string;
+        wordLimit?: number;
+      }
     ) => {
       if (isRunning) return;
       setMessages(next);
@@ -342,7 +409,7 @@ export function useDebate() {
         lastSettingsRef.current = {
           prompt: meta.prompt,
           rounds: meta.rounds ?? 1,
-          charLimit: meta.charLimit ?? 600,
+          wordLimit: meta.wordLimit ?? DEFAULT_WORD_LIMIT,
         };
       }
     },
@@ -364,7 +431,7 @@ export function useDebate() {
     const s = lastSettingsRef.current;
     if (!s || messages.length === 0) return;
     exportAsJson(
-      buildExportPayload(s.prompt, s.rounds, s.charLimit, order, messages)
+      buildExportPayload(s.prompt, s.rounds, s.wordLimit, order, messages)
     );
   }, [messages, order]);
 
@@ -372,7 +439,7 @@ export function useDebate() {
     const s = lastSettingsRef.current;
     if (!s || messages.length === 0) return;
     exportAsMarkdown(
-      buildExportPayload(s.prompt, s.rounds, s.charLimit, order, messages)
+      buildExportPayload(s.prompt, s.rounds, s.wordLimit, order, messages)
     );
   }, [messages, order]);
 

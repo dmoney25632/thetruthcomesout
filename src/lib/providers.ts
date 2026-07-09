@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import type {
   DebateTurnRequest,
   DebateTurnResponse,
@@ -8,17 +8,41 @@ import type {
 } from "@/lib/types";
 import { DEBATE_SYSTEM_PROMPT, buildTurnPrompt } from "@/lib/models";
 import { ProviderError, classifyProviderError } from "@/lib/errors";
+import { countWords, truncateWords } from "@/lib/utils";
 
-function truncate(text: string, charLimit: number): string {
-  if (text.length <= charLimit) return text;
-  return text.slice(0, charLimit - 1).trimEnd() + "…";
-}
-
-function maxOutputTokens(charLimit: number): number {
-  return Math.min(Math.ceil(charLimit / 2) + 64, 4096);
+/** Generous token budget so the soft word ceiling is the real constraint. */
+function maxOutputTokens(wordLimit: number): number {
+  return Math.min(Math.ceil(wordLimit * 2) + 64, 8192);
 }
 
 export type TokenCallback = (text: string) => void;
+
+function finalizeContent(text: string, wordLimit: number): string {
+  return truncateWords(text.trim(), wordLimit);
+}
+
+/** Stream deltas until we hit the soft word ceiling. */
+function appendWithinWordLimit(
+  content: string,
+  delta: string,
+  wordLimit: number,
+  onToken?: TokenCallback
+): string {
+  if (!delta) return content;
+  if (countWords(content) >= wordLimit) return content;
+
+  const next = content + delta;
+  if (countWords(next) <= wordLimit) {
+    onToken?.(delta);
+    return next;
+  }
+
+  // Last chunk would overflow — emit only what fits as whole words
+  const clipped = truncateWords(next, wordLimit);
+  const extra = clipped.slice(content.length);
+  if (extra) onToken?.(extra);
+  return clipped;
+}
 
 async function callOpenAICompatible(
   req: DebateTurnRequest,
@@ -30,14 +54,14 @@ async function callOpenAICompatible(
     ...(baseURL ? { baseURL } : {}),
   });
 
-  const prompt = buildTurnPrompt(req.messages, req.speakerLabel, req.charLimit);
+  const prompt = buildTurnPrompt(req.messages, req.speakerLabel, req.wordLimit);
   const isXai = !!baseURL;
 
   try {
     if (onToken) {
       const stream = await client.chat.completions.create({
         model: req.model,
-        max_tokens: maxOutputTokens(req.charLimit),
+        max_tokens: maxOutputTokens(req.wordLimit),
         stream: true,
         // OpenAI supports include_usage; xAI may not — omit for xAI
         ...(!isXai ? { stream_options: { include_usage: true } } : {}),
@@ -52,13 +76,7 @@ async function callOpenAICompatible(
 
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content ?? "";
-        if (delta) {
-          const room = req.charLimit - content.length;
-          if (room <= 0) continue;
-          const piece = delta.slice(0, room);
-          content += piece;
-          onToken(piece);
-        }
+        content = appendWithinWordLimit(content, delta, req.wordLimit, onToken);
         if (chunk.usage) {
           usage = {
             promptTokens: chunk.usage.prompt_tokens,
@@ -68,25 +86,23 @@ async function callOpenAICompatible(
         }
       }
 
-      return { content: truncate(content.trim(), req.charLimit), usage };
+      return { content: finalizeContent(content, req.wordLimit), usage };
     }
 
     const completion = await client.chat.completions.create({
       model: req.model,
-      max_tokens: maxOutputTokens(req.charLimit),
+      max_tokens: maxOutputTokens(req.wordLimit),
       messages: [
         { role: "system", content: DEBATE_SYSTEM_PROMPT },
         { role: "user", content: prompt },
       ],
     });
 
-    const content = truncate(
-      completion.choices[0]?.message?.content?.trim() ?? "",
-      req.charLimit
-    );
-
     return {
-      content,
+      content: finalizeContent(
+        completion.choices[0]?.message?.content ?? "",
+        req.wordLimit
+      ),
       usage: {
         promptTokens: completion.usage?.prompt_tokens,
         completionTokens: completion.usage?.completion_tokens,
@@ -103,33 +119,29 @@ async function callAnthropic(
   onToken?: TokenCallback
 ): Promise<DebateTurnResponse> {
   const client = new Anthropic({ apiKey: req.apiKey });
-  const prompt = buildTurnPrompt(req.messages, req.speakerLabel, req.charLimit);
+  const prompt = buildTurnPrompt(req.messages, req.speakerLabel, req.wordLimit);
 
   try {
     if (onToken) {
       const stream = client.messages.stream({
         model: req.model,
-        max_tokens: maxOutputTokens(req.charLimit),
+        max_tokens: maxOutputTokens(req.wordLimit),
         system: DEBATE_SYSTEM_PROMPT,
         messages: [{ role: "user", content: prompt }],
       });
 
       let content = "";
       stream.on("text", (text) => {
-        const room = req.charLimit - content.length;
-        if (room <= 0) return;
-        const piece = text.slice(0, room);
-        content += piece;
-        onToken(piece);
+        content = appendWithinWordLimit(content, text, req.wordLimit, onToken);
       });
 
       const message = await stream.finalMessage();
       const textBlock = message.content.find((b) => b.type === "text");
       const finalText =
-        textBlock && textBlock.type === "text" ? textBlock.text.trim() : content.trim();
+        textBlock && textBlock.type === "text" ? textBlock.text : content;
 
       return {
-        content: truncate(finalText, req.charLimit),
+        content: finalizeContent(finalText, req.wordLimit),
         usage: {
           promptTokens: message.usage.input_tokens,
           completionTokens: message.usage.output_tokens,
@@ -140,19 +152,17 @@ async function callAnthropic(
 
     const message = await client.messages.create({
       model: req.model,
-      max_tokens: maxOutputTokens(req.charLimit),
+      max_tokens: maxOutputTokens(req.wordLimit),
       system: DEBATE_SYSTEM_PROMPT,
       messages: [{ role: "user", content: prompt }],
     });
 
     const textBlock = message.content.find((b) => b.type === "text");
-    const content = truncate(
-      textBlock && textBlock.type === "text" ? textBlock.text.trim() : "",
-      req.charLimit
-    );
+    const raw =
+      textBlock && textBlock.type === "text" ? textBlock.text : "";
 
     return {
-      content,
+      content: finalizeContent(raw, req.wordLimit),
       usage: {
         promptTokens: message.usage.input_tokens,
         completionTokens: message.usage.output_tokens,
@@ -168,67 +178,56 @@ async function callGoogle(
   req: DebateTurnRequest,
   onToken?: TokenCallback
 ): Promise<DebateTurnResponse> {
-  const genAI = new GoogleGenerativeAI(req.apiKey);
-  const model = genAI.getGenerativeModel({
-    model: req.model,
+  const ai = new GoogleGenAI({ apiKey: req.apiKey });
+  const prompt = buildTurnPrompt(req.messages, req.speakerLabel, req.wordLimit);
+  const config = {
     systemInstruction: DEBATE_SYSTEM_PROMPT,
-  });
-
-  const prompt = buildTurnPrompt(req.messages, req.speakerLabel, req.charLimit);
+    maxOutputTokens: maxOutputTokens(req.wordLimit),
+  };
 
   try {
     if (onToken) {
-      const result = await model.generateContentStream({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          maxOutputTokens: maxOutputTokens(req.charLimit),
-        },
+      const stream = await ai.models.generateContentStream({
+        model: req.model,
+        contents: prompt,
+        config,
       });
 
       let content = "";
-      for await (const chunk of result.stream) {
-        const delta = chunk.text();
-        if (!delta) continue;
-        const room = req.charLimit - content.length;
-        if (room <= 0) continue;
-        const piece = delta.slice(0, room);
-        content += piece;
-        onToken(piece);
+      let usage: DebateTurnResponse["usage"];
+
+      for await (const chunk of stream) {
+        content = appendWithinWordLimit(
+          content,
+          chunk.text ?? "",
+          req.wordLimit,
+          onToken
+        );
+        const meta = chunk.usageMetadata;
+        if (meta) {
+          usage = {
+            promptTokens: meta.promptTokenCount,
+            completionTokens: meta.candidatesTokenCount,
+            totalTokens: meta.totalTokenCount,
+          };
+        }
       }
 
-      const aggregated = await result.response;
-      const usage = aggregated.usageMetadata;
-      const finalText = truncate(
-        (aggregated.text()?.trim() || content).trim(),
-        req.charLimit
-      );
-
-      return {
-        content: finalText,
-        usage: {
-          promptTokens: usage?.promptTokenCount,
-          completionTokens: usage?.candidatesTokenCount,
-          totalTokens: usage?.totalTokenCount,
-        },
-      };
+      return { content: finalizeContent(content, req.wordLimit), usage };
     }
 
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        maxOutputTokens: maxOutputTokens(req.charLimit),
-      },
+    const result = await ai.models.generateContent({
+      model: req.model,
+      contents: prompt,
+      config,
     });
 
-    const content = truncate(result.response.text()?.trim() ?? "", req.charLimit);
-    const usage = result.response.usageMetadata;
-
     return {
-      content,
+      content: finalizeContent(result.text ?? "", req.wordLimit),
       usage: {
-        promptTokens: usage?.promptTokenCount,
-        completionTokens: usage?.candidatesTokenCount,
-        totalTokens: usage?.totalTokenCount,
+        promptTokens: result.usageMetadata?.promptTokenCount,
+        completionTokens: result.usageMetadata?.candidatesTokenCount,
+        totalTokens: result.usageMetadata?.totalTokenCount,
       },
     };
   } catch (err) {

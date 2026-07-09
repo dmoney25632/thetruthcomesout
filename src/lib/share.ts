@@ -1,4 +1,5 @@
 import type { DebateExport, DebateMessage } from "@/lib/types";
+import { DEFAULT_WORD_LIMIT } from "@/lib/types";
 
 type CompactMessage = {
   r: "u" | "a";
@@ -14,7 +15,9 @@ type CompactShare = {
   v: 1;
   prompt: string;
   rounds: number;
-  charLimit: number;
+  wordLimit?: number;
+  /** @deprecated older shares */
+  charLimit?: number;
   order: string[];
   messages: CompactMessage[];
 };
@@ -110,12 +113,20 @@ function expandMessages(compact: CompactMessage[]): DebateMessage[] {
   });
 }
 
+function resolveWordLimit(data: CompactShare): number {
+  if (typeof data.wordLimit === "number") return data.wordLimit;
+  if (typeof data.charLimit === "number") {
+    return Math.max(20, Math.round(data.charLimit / 5));
+  }
+  return DEFAULT_WORD_LIMIT;
+}
+
 export async function encodeShareHash(payload: DebateExport): Promise<string> {
   const compact: CompactShare = {
     v: 1,
     prompt: payload.prompt,
     rounds: payload.rounds,
-    charLimit: payload.charLimit,
+    wordLimit: payload.wordLimit,
     order: payload.order,
     messages: compactMessages(payload.messages),
   };
@@ -127,7 +138,7 @@ export async function decodeShareHash(
 ): Promise<{
   prompt: string;
   rounds: number;
-  charLimit: number;
+  wordLimit: number;
   order: string[];
   messages: DebateMessage[];
 } | null> {
@@ -140,7 +151,7 @@ export async function decodeShareHash(
     return {
       prompt: data.prompt,
       rounds: data.rounds,
-      charLimit: data.charLimit,
+      wordLimit: resolveWordLimit(data),
       order: data.order ?? [],
       messages: expandMessages(data.messages),
     };

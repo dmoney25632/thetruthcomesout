@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runDebateTurn } from "@/lib/providers";
 import type { DebateTurnRequest, StreamEvent } from "@/lib/types";
-import { MAX_ROUNDS } from "@/lib/types";
+import {
+  MAX_ROUNDS,
+  MAX_WORD_LIMIT,
+  MIN_WORD_LIMIT,
+} from "@/lib/types";
 import {
   ProviderError,
   classifyProviderError,
@@ -18,7 +22,8 @@ function redactLog(msg: string): string {
     .replace(/sk-[a-zA-Z0-9_-]+/g, "[redacted]")
     .replace(/sk-ant-[a-zA-Z0-9_-]+/g, "[redacted]")
     .replace(/xai-[a-zA-Z0-9_-]+/g, "[redacted]")
-    .replace(/AIza[a-zA-Z0-9_-]+/g, "[redacted]");
+    .replace(/AIza[a-zA-Z0-9_-]+/g, "[redacted]")
+    .replace(/AQ\.[a-zA-Z0-9_-]+/g, "[redacted]");
 }
 
 function validateBody(body: DebateTurnRequest): string | null {
@@ -34,8 +39,12 @@ function validateBody(body: DebateTurnRequest): string | null {
   if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
     return "messages array is required";
   }
-  if (typeof body.charLimit !== "number" || body.charLimit < 50 || body.charLimit > 4000) {
-    return "charLimit must be between 50 and 4000";
+  if (
+    typeof body.wordLimit !== "number" ||
+    body.wordLimit < MIN_WORD_LIMIT ||
+    body.wordLimit > MAX_WORD_LIMIT
+  ) {
+    return `wordLimit must be between ${MIN_WORD_LIMIT} and ${MAX_WORD_LIMIT}`;
   }
   const assistantTurns = body.messages.filter((m) => m.role === "assistant").length;
   if (assistantTurns > MAX_ROUNDS * 4) {
@@ -68,7 +77,7 @@ export async function POST(request: NextRequest) {
     model: body.model.trim(),
     apiKey: body.apiKey.trim(),
     messages: body.messages,
-    charLimit: body.charLimit,
+    wordLimit: body.wordLimit,
     speakerLabel: body.speakerLabel || body.model,
   };
 

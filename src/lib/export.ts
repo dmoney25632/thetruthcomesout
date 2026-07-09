@@ -4,7 +4,7 @@ import { downloadFile } from "@/lib/utils";
 export function buildExportPayload(
   prompt: string,
   rounds: number,
-  charLimit: number,
+  wordLimit: number,
   order: string[],
   messages: DebateMessage[]
 ): DebateExport {
@@ -12,7 +12,7 @@ export function buildExportPayload(
     title: "Model Clash Debate",
     prompt,
     rounds,
-    charLimit,
+    wordLimit,
     order,
     messages,
     exportedAt: new Date().toISOString(),
@@ -34,7 +34,7 @@ export function exportAsMarkdown(payload: DebateExport) {
     ``,
     `**Exported:** ${payload.exportedAt}`,
     `**Rounds:** ${payload.rounds}`,
-    `**Char limit:** ${payload.charLimit}`,
+    `**Word limit:** ${payload.wordLimit} (soft max)`,
     `**Speaking order:** ${payload.order.join(" → ")}`,
     ``,
     `## Prompt`,

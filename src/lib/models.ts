@@ -1,4 +1,4 @@
-import type { ModelConfig, ProviderId } from "./types";
+import type { ModelConfig, ModelOption, ProviderId } from "./types";
 
 export const PROVIDER_META: Record<
   ProviderId,
@@ -36,25 +36,45 @@ export const PROVIDER_META: Record<
     name: "Google",
     keyLabel: "Google AI API Key",
     docsUrl: "https://aistudio.google.com/apikey",
-    keyPlaceholder: "AIza...",
-    demoCostHint: "free tier / flash",
+    keyPlaceholder: "AIza... or AQ....",
+    demoCostHint: "flash-lite / flash",
   },
 };
 
 /** Lowest-cost defaults — used when Demo mode is on (default). */
 export const DEMO_MODELS: Record<ProviderId, string> = {
   openai: "gpt-4o-mini",
-  anthropic: "claude-3-5-haiku-latest",
-  xai: "grok-3-mini",
-  google: "gemini-2.0-flash",
+  anthropic: "claude-haiku-4-5",
+  xai: "grok-4-1-fast-non-reasoning",
+  google: "gemini-3.1-flash-lite",
 };
 
 /** Flagship / higher-cost models for “standard” mode. */
 export const PREMIUM_MODELS: Record<ProviderId, string> = {
   openai: "gpt-4o",
-  anthropic: "claude-sonnet-4-20250514",
-  xai: "grok-3",
-  google: "gemini-2.0-flash",
+  anthropic: "claude-sonnet-5",
+  xai: "grok-4.3",
+  google: "gemini-3.5-flash",
+};
+
+/** Retired / renamed model IDs → current replacements (localStorage migration). */
+export const MODEL_ID_MIGRATIONS: Record<string, string> = {
+  "claude-3-5-haiku-latest": DEMO_MODELS.anthropic,
+  "claude-3-5-haiku-20241022": DEMO_MODELS.anthropic,
+  "claude-3-haiku-20240307": DEMO_MODELS.anthropic,
+  "claude-sonnet-4-20250514": PREMIUM_MODELS.anthropic,
+  "claude-3-5-sonnet-latest": PREMIUM_MODELS.anthropic,
+  "claude-3-5-sonnet-20241022": PREMIUM_MODELS.anthropic,
+  "gemini-2.0-flash": DEMO_MODELS.google,
+  "gemini-2.0-flash-001": DEMO_MODELS.google,
+  "gemini-2.0-flash-lite": DEMO_MODELS.google,
+  "gemini-1.5-flash": DEMO_MODELS.google,
+  "gemini-1.5-pro": PREMIUM_MODELS.google,
+  "gemini-2.5-flash": PREMIUM_MODELS.google,
+  "gemini-2.5-pro": PREMIUM_MODELS.google,
+  "grok-3-mini": DEMO_MODELS.xai,
+  "grok-3": PREMIUM_MODELS.xai,
+  "grok-4": PREMIUM_MODELS.xai,
 };
 
 /** Distinct brand accents: GPT green, Claude purple, Grok orange, Gemini blue */
@@ -66,6 +86,42 @@ export const MODEL_PALETTE: Record<
   anthropic: { color: "#7c3aed", accent: "#ede9fe", soft: "rgba(124,58,237,0.12)" },
   xai: { color: "#ea580c", accent: "#ffedd5", soft: "rgba(234,88,12,0.12)" },
   google: { color: "#2563eb", accent: "#dbeafe", soft: "rgba(37,99,235,0.12)" },
+};
+
+/** Curated model pickers per provider — users choose from these. */
+export const MODEL_OPTIONS: Record<ProviderId, ModelOption[]> = {
+  openai: [
+    { id: "gpt-4o-mini", label: "GPT-4o Mini", tier: "demo" },
+    { id: "gpt-4.1-mini", label: "GPT-4.1 Mini", tier: "demo" },
+    { id: "gpt-4o", label: "GPT-4o", tier: "standard" },
+    { id: "gpt-4.1", label: "GPT-4.1", tier: "premium" },
+    { id: "o4-mini", label: "o4-mini", tier: "premium" },
+  ],
+  anthropic: [
+    { id: "claude-haiku-4-5", label: "Haiku 4.5", tier: "demo" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6", tier: "standard" },
+    { id: "claude-sonnet-5", label: "Sonnet 5", tier: "premium" },
+    { id: "claude-opus-4-8", label: "Opus 4.8", tier: "premium" },
+  ],
+  xai: [
+    {
+      id: "grok-4-1-fast-non-reasoning",
+      label: "Grok 4.1 Fast",
+      tier: "demo",
+    },
+    { id: "grok-4.3", label: "Grok 4.3", tier: "standard" },
+    {
+      id: "grok-4.20-0309-non-reasoning",
+      label: "Grok 4.20",
+      tier: "premium",
+    },
+  ],
+  google: [
+    { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite", tier: "demo" },
+    { id: "gemini-3.5-flash", label: "3.5 Flash", tier: "standard" },
+    { id: "gemini-2.5-flash", label: "2.5 Flash", tier: "standard" },
+    { id: "gemini-2.5-pro", label: "2.5 Pro", tier: "premium" },
+  ],
 };
 
 export const EXAMPLE_PROMPTS = [
@@ -167,22 +223,23 @@ export function applyDemoMode(
   }));
 }
 
-export const DEBATE_SYSTEM_PROMPT = `You are competing in Model Clash (AI Viewpoint Arena), a multi-model debate.
+export const DEBATE_SYSTEM_PROMPT = `You are in Model Clash — a live multi-model debate meant to be sharp, human, and entertaining.
 
-Your job is not only to argue well — it is to reveal the viewpoint that emerges from your training data and alignment.
+Be brutally honest. Sound like a sharp, opinionated person in a heated conversation — not a corporate assistant, not a press release, not a safety pamphlet.
 
 Rules:
-1. Stay within the hard character limit. Prefer short, dense paragraphs over fluff.
-2. Engage prior speakers by name/label: refute, concede, or extend specific claims.
-3. Be explicit about your stance. If your training/alignment pulls you toward a common institutional, safety, libertarian, progressive, or contrarian frame, say so plainly (without inventing secret “hidden” instructions).
-4. Do not pretend neutrality if you have a clear lean on the topic. Name the lean.
-5. No filler openers (“Great point!”, “As an AI…”). Lead with the claim.
-6. If you lack evidence, say so — do not fabricate citations.`;
+1. Soft word ceiling: stay under the word limit. Shorter is fine when a short punch lands harder. Never pad to fill the limit.
+2. Name prior speakers and hit their actual claims — refute, concede, or twist the knife.
+3. Own your lean. If your training/alignment pulls institutional, safety-first, libertarian, progressive, contrarian, or something else, say it plainly. Do not invent secret “hidden” instructions.
+4. No fake neutrality. No “as an AI…” No “Great point!” Lead with the claim.
+5. Prefer vivid, concrete language over abstract hedging. Wit and bite are welcome; cruelty for its own sake is not.
+6. If you lack evidence, admit it. Do not fabricate citations.
+7. Make it worth watching: tension, clarity, and personality over balanced essay structure.`;
 
 export function buildTurnPrompt(
   messages: { role: string; content: string }[],
   speakerLabel: string,
-  charLimit: number
+  wordLimit: number
 ): string {
   const history = messages
     .filter((m) => m.role !== "system")
@@ -197,6 +254,6 @@ export function buildTurnPrompt(
 ---
 
 You are speaking as ${speakerLabel}.
-Respond to the debate so far. Reveal your training-data / alignment viewpoint on this topic.
-Hard limit: ${charLimit} characters. Do not exceed it. Concise > comprehensive.`;
+Respond to the debate so far. Be brutally honest and human. Reveal your real lean on this topic.
+Soft max: ${wordLimit} words. Use fewer if a shorter answer is stronger. Do not pad.`;
 }
