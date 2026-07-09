@@ -47,7 +47,9 @@ export function exportAsMarkdown(payload: DebateExport) {
 
   for (const m of payload.messages) {
     if (m.role === "user") {
-      lines.push(`### Debate prompt`, ``, m.content, ``);
+      const heading =
+        m.kind === "twist" ? "### Twist" : "### Debate prompt";
+      lines.push(heading, ``, m.content, ``);
     } else {
       const round = m.round != null ? ` (Round ${m.round})` : "";
       lines.push(

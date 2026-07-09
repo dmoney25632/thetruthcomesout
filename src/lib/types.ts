@@ -29,10 +29,14 @@ export interface ApiKeys {
   google: string;
 }
 
+export type UserMessageKind = "motion" | "twist";
+
 export interface DebateMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** Distinguishes the opening motion from mid-debate twists */
+  kind?: UserMessageKind;
   modelId?: string;
   modelLabel?: string;
   provider?: ProviderId;
@@ -42,6 +46,19 @@ export interface DebateMessage {
   timestamp: string;
   error?: boolean;
   streaming?: boolean;
+}
+
+/** A debate snapshot stored in the browser (no accounts). */
+export interface SavedDebate {
+  id: string;
+  title: string;
+  prompt: string;
+  rounds: number;
+  wordLimit: number;
+  order: string[];
+  messages: DebateMessage[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DebateSettings {
@@ -99,8 +116,12 @@ export const MAX_ROUNDS = 10;
 export const MIN_WORD_LIMIT = 20;
 export const MAX_WORD_LIMIT = 2000;
 export const DEFAULT_WORD_LIMIT = 150;
+/** Cap local debate library so localStorage stays healthy */
+export const MAX_SAVED_DEBATES = 20;
 export const STORAGE_KEYS = {
   apiKeys: "model-clash:api-keys",
   models: "model-clash:models",
   settings: "model-clash:settings",
+  debates: "model-clash:debates",
+  activeDebateId: "model-clash:active-debate-id",
 } as const;

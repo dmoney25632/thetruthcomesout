@@ -8,19 +8,38 @@ import { AlertCircle } from "lucide-react";
 
 export function ChatBubble({ message }: { message: DebateMessage }) {
   if (message.role === "user") {
+    const isTwist = message.kind === "twist";
     return (
       <div className="animate-fade-up mx-auto w-full max-w-3xl px-1">
-        <div className="relative overflow-hidden rounded-2xl border border-stone-800/10 bg-stone-900 px-5 py-4 text-stone-50 shadow-lg shadow-stone-900/10">
+        <div
+          className={`relative overflow-hidden rounded-2xl border px-5 py-4 shadow-lg ${
+            isTwist
+              ? "border-amber-700/20 bg-amber-950 text-amber-50 shadow-amber-950/10"
+              : "border-stone-800/10 bg-stone-900 text-stone-50 shadow-stone-900/10"
+          }`}
+        >
           <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/5" />
           <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-400">
-              The motion
+            <span
+              className={`text-xs font-semibold uppercase tracking-[0.14em] ${
+                isTwist ? "text-amber-400/80" : "text-stone-400"
+              }`}
+            >
+              {isTwist ? "The twist" : "The motion"}
             </span>
-            <time className="text-xs text-stone-500">
+            <time
+              className={`text-xs ${isTwist ? "text-amber-500/70" : "text-stone-500"}`}
+            >
               {formatTimestamp(message.timestamp)}
             </time>
           </div>
-          <p className="relative whitespace-pre-wrap font-display text-lg leading-snug tracking-tight text-stone-50 sm:text-xl">
+          <p
+            className={`relative whitespace-pre-wrap font-display leading-snug tracking-tight ${
+              isTwist
+                ? "text-base text-amber-50 sm:text-lg"
+                : "text-lg text-stone-50 sm:text-xl"
+            }`}
+          >
             {message.content}
           </p>
         </div>

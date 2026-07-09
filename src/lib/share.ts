@@ -9,6 +9,8 @@ type CompactMessage = {
   o?: number;
   t?: string;
   e?: 1;
+  /** Twist / continuation user message */
+  k?: "t";
 };
 
 type CompactShare = {
@@ -66,7 +68,12 @@ function compactMessages(messages: DebateMessage[]): CompactMessage[] {
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => {
       if (m.role === "user") {
-        return { r: "u" as const, c: m.content, t: m.timestamp };
+        return {
+          r: "u" as const,
+          c: m.content,
+          t: m.timestamp,
+          ...(m.kind === "twist" ? { k: "t" as const } : {}),
+        };
       }
       return {
         r: "a" as const,
@@ -94,6 +101,7 @@ function expandMessages(compact: CompactMessage[]): DebateMessage[] {
         id: `share-u-${i}`,
         role: "user" as const,
         content: m.c,
+        kind: m.k === "t" ? ("twist" as const) : ("motion" as const),
         timestamp: m.t || new Date().toISOString(),
       };
     }
@@ -162,12 +170,13 @@ export async function decodeShareHash(
 
 export async function writeShareUrl(payload: DebateExport): Promise<string> {
   const encoded = await encodeShareHash(payload);
-  const url = `${window.location.origin}${window.location.pathname}#d=${encoded}`;
+  const path = `${window.location.pathname}${window.location.search}`;
+  const url = `${window.location.origin}${path}#d=${encoded}`;
   // Soft limit — very long hashes still work but are awkward to share
   if (url.length > 500_000) {
     throw new Error("Debate is too long to share via URL. Export Markdown instead.");
   }
-  window.history.replaceState(null, "", `#d=${encoded}`);
+  window.history.replaceState(null, "", `${path}#d=${encoded}`);
   return url;
 }
 

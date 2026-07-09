@@ -1,6 +1,11 @@
 "use client";
 
-import type { ApiKeys, DebateSettings, ModelConfig } from "@/lib/types";
+import type {
+  ApiKeys,
+  DebateSettings,
+  ModelConfig,
+  SavedDebate,
+} from "@/lib/types";
 import {
   MAX_ROUNDS,
   MAX_WORD_LIMIT,
@@ -9,6 +14,7 @@ import {
 import { MODEL_OPTIONS, PROVIDER_META } from "@/lib/models";
 import { estimateTokens } from "@/lib/utils";
 import { ModelAvatar } from "./ModelAvatar";
+import { DebateLibrary } from "./DebateLibrary";
 import {
   AlertTriangle,
   ChevronLeft,
@@ -41,6 +47,11 @@ interface SidebarProps {
   clearKeys: () => void;
   isRunning: boolean;
   estimatedTokens: number;
+  debates: SavedDebate[];
+  activeDebateId: string | null;
+  onNewDebate: () => void;
+  onSelectDebate: (id: string) => void;
+  onDeleteDebate: (id: string) => void;
 }
 
 export function Sidebar({
@@ -58,6 +69,11 @@ export function Sidebar({
   clearKeys,
   isRunning,
   estimatedTokens,
+  debates,
+  activeDebateId,
+  onNewDebate,
+  onSelectDebate,
+  onDeleteDebate,
 }: SidebarProps) {
   const [showKeys, setShowKeys] = useState(false);
 
@@ -179,6 +195,15 @@ export function Sidebar({
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
+          <DebateLibrary
+            debates={debates}
+            activeId={activeDebateId}
+            isRunning={isRunning}
+            onNew={onNewDebate}
+            onSelect={onSelectDebate}
+            onDelete={onDeleteDebate}
+          />
+
           <section
             className={`rounded-xl border px-3 py-3 ${
               settings.demoMode

@@ -31,6 +31,7 @@ export default function HomePage() {
     "idle"
   );
   const [shareError, setShareError] = useState<string | null>(null);
+  const [twist, setTwist] = useState("");
 
   const {
     hydrated,
@@ -53,14 +54,22 @@ export default function HomePage() {
     totalRounds,
     order,
     error,
+    debateId,
+    library,
+    libraryHydrated,
     start,
+    continueDebate,
     stop,
     clear,
+    newDebate,
+    switchDebate,
+    deleteDebate,
     loadMessages,
     estimateUsage,
     doExportJson,
     doExportMd,
     canExport,
+    canContinue,
     lastSettings,
   } = useDebate();
 
@@ -79,15 +88,83 @@ export default function HomePage() {
     enabledCount >= 2 &&
     !missingKeys;
 
+  const canContinueSubmit =
+    canContinue &&
+    twist.trim().length > 0 &&
+    enabledCount >= 2 &&
+    !missingKeys;
+
   const handleStart = useCallback(() => {
     if (!canStart) return;
     void start(settings, models, apiKeys);
+    setTwist("");
     setSidebarOpen(false);
   }, [canStart, start, settings, models, apiKeys]);
 
-  // Restore shared debate from URL hash
+  const handleContinue = useCallback(() => {
+    if (!canContinueSubmit) return;
+    void continueDebate(twist, settings, models, apiKeys);
+    setTwist("");
+    setSidebarOpen(false);
+  }, [canContinueSubmit, continueDebate, twist, settings, models, apiKeys]);
+
+  const handleSelectDebate = useCallback(
+    (id: string) => {
+      const found = switchDebate(id);
+      if (found) {
+        setSettings((s) => ({
+          ...s,
+          prompt: found.prompt,
+          rounds: found.rounds,
+          wordLimit: found.wordLimit,
+        }));
+        setTwist("");
+        clearShareHash();
+        setSidebarOpen(false);
+      }
+    },
+    [switchDebate, setSettings]
+  );
+
+  const handleNewDebate = useCallback(() => {
+    newDebate();
+    setSettings((s) => ({ ...s, prompt: "" }));
+    setTwist("");
+    clearShareHash();
+    setSidebarOpen(false);
+  }, [newDebate, setSettings]);
+
+  const handleDeleteDebate = useCallback(
+    (id: string) => {
+      const wasActive = id === debateId;
+      deleteDebate(id);
+      if (wasActive) {
+        setTwist("");
+        clearShareHash();
+      }
+    },
+    [deleteDebate, debateId]
+  );
+
+  // Sync settings when a debate is restored from the library on first load
   useEffect(() => {
-    if (!hydrated) return;
+    if (!libraryHydrated || !debateId) return;
+    if (typeof window !== "undefined" && window.location.hash.startsWith("#d=")) {
+      return;
+    }
+    const found = library.find((d) => d.id === debateId);
+    if (!found) return;
+    setSettings((s) => ({
+      ...s,
+      prompt: found.prompt,
+      rounds: found.rounds,
+      wordLimit: found.wordLimit,
+    }));
+  }, [libraryHydrated]); // eslint-disable-line react-hooks/exhaustive-deps -- initial restore only
+
+  // Restore shared debate from URL hash (takes priority over library)
+  useEffect(() => {
+    if (!hydrated || !libraryHydrated) return;
     const hash = window.location.hash;
     if (!hash.startsWith("#d=")) return;
     let cancelled = false;
@@ -106,11 +183,12 @@ export default function HomePage() {
         rounds: data.rounds,
         wordLimit: data.wordLimit,
       }));
+      setTwist("");
     })();
     return () => {
       cancelled = true;
     };
-  }, [hydrated, loadMessages, setSettings]);
+  }, [hydrated, libraryHydrated, loadMessages, setSettings]);
 
   // Persist finished debates into the hash for easy refresh/share
   useEffect(() => {
@@ -143,22 +221,32 @@ export default function HomePage() {
         return;
       }
 
-      // Enter-to-start is handled inside PromptComposer when focused;
-      // global Enter only when not in another field and prompt ready
       if (
         e.key === "Enter" &&
         !e.shiftKey &&
         !inField &&
-        canStart &&
         !isRunning
       ) {
-        e.preventDefault();
-        handleStart();
+        if (messages.length > 0 && canContinueSubmit) {
+          e.preventDefault();
+          handleContinue();
+        } else if (messages.length === 0 && canStart) {
+          e.preventDefault();
+          handleStart();
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isRunning, stop, canStart, handleStart]);
+  }, [
+    isRunning,
+    stop,
+    canStart,
+    canContinueSubmit,
+    handleStart,
+    handleContinue,
+    messages.length,
+  ]);
 
   const handleShare = async () => {
     const s = lastSettings.current;
@@ -180,8 +268,11 @@ export default function HomePage() {
 
   const handleClear = () => {
     clear();
+    setTwist("");
     clearShareHash();
   };
+
+  const showContinueComposer = hydrated && (messages.length > 0 || isRunning);
 
   return (
     <div className="flex h-dvh overflow-hidden bg-[var(--arena-bg)]">
@@ -200,6 +291,11 @@ export default function HomePage() {
         clearKeys={clearKeys}
         isRunning={isRunning}
         estimatedTokens={estimatedTokens}
+        debates={library}
+        activeDebateId={debateId}
+        onNewDebate={handleNewDebate}
+        onSelectDebate={handleSelectDebate}
+        onDeleteDebate={handleDeleteDebate}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -234,6 +330,7 @@ export default function HomePage() {
               <p className="truncate text-[11px] text-stone-400">
                 AI Viewpoint Arena
                 {settings.demoMode ? " · Demo" : ""}
+                {library.length > 0 ? ` · ${library.length} saved` : ""}
               </p>
             </div>
           </div>
@@ -299,7 +396,7 @@ export default function HomePage() {
           />
         )}
 
-        {!hydrated ? (
+        {!hydrated || !libraryHydrated ? (
           <div className="flex flex-1 items-center justify-center text-sm text-stone-400">
             Loading arena…
           </div>
@@ -334,24 +431,24 @@ export default function HomePage() {
           </main>
         )}
 
-        {/* Sticky composer when a debate is on screen */}
-        {hydrated && (messages.length > 0 || isRunning) && (
+        {showContinueComposer && (
           <div className="border-t border-stone-200/80 bg-white/85 px-3 py-3 backdrop-blur-md sm:px-4">
             <PromptComposer
-              value={settings.prompt}
-              onChange={(v) => setSettings((s) => ({ ...s, prompt: v }))}
-              onSubmit={handleStart}
+              mode="continue"
+              value={twist}
+              onChange={setTwist}
+              onSubmit={handleContinue}
               onStop={stop}
               isRunning={isRunning}
-              canStart={canStart}
+              canStart={canContinueSubmit}
             />
           </div>
         )}
 
         {!(messages.length > 0 || isRunning) && (
           <footer className="border-t border-stone-200/80 bg-white/70 px-4 py-2 text-center text-[10px] text-stone-400 backdrop-blur-sm">
-            Keys stay in your browser. You pay providers directly. Share links
-            encode the transcript in the URL hash — no server storage.
+            Keys and debates stay in your browser. Share links encode the
+            transcript in the URL hash — no accounts, no server storage.
           </footer>
         )}
       </div>
