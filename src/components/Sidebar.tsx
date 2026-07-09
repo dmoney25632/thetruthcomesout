@@ -2,6 +2,7 @@
 
 import type {
   ApiKeys,
+  DebatePace,
   DebateSettings,
   ModelConfig,
   SavedDebate,
@@ -10,6 +11,7 @@ import {
   MAX_ROUNDS,
   MAX_WORD_LIMIT,
   MIN_WORD_LIMIT,
+  PACE_TIMING,
 } from "@/lib/types";
 import { MODEL_OPTIONS, PROVIDER_META } from "@/lib/models";
 import { estimateTokens } from "@/lib/utils";
@@ -303,6 +305,50 @@ export function Sidebar({
             Soft max per turn — models may use fewer words. They won&apos;t pad
             to fill it.
           </p>
+
+          <section className="space-y-1.5">
+            <label
+              htmlFor="pace"
+              className="text-xs font-semibold uppercase tracking-wider text-stone-500"
+            >
+              Pace
+            </label>
+            <div
+              id="pace"
+              className="grid grid-cols-3 gap-1.5"
+              role="group"
+              aria-label="Debate pace"
+            >
+              {(Object.keys(PACE_TIMING) as DebatePace[]).map((pace) => {
+                const active = settings.pace === pace;
+                return (
+                  <button
+                    key={pace}
+                    type="button"
+                    disabled={isRunning}
+                    onClick={() => setSettings((s) => ({ ...s, pace }))}
+                    className={`rounded-xl border px-2 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
+                      active
+                        ? "border-stone-800 bg-stone-800 text-white"
+                        : "border-stone-200 bg-stone-50 text-stone-600 hover:border-stone-300"
+                    }`}
+                  >
+                    {PACE_TIMING[pace].label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] leading-relaxed text-stone-400">
+              {PACE_TIMING[settings.pace]?.description ??
+                PACE_TIMING.normal.description}{" "}
+              — gap between models:{" "}
+              {Math.round(
+                (PACE_TIMING[settings.pace]?.betweenSpeakerMs ??
+                  PACE_TIMING.normal.betweenSpeakerMs) / 1000
+              )}
+              s
+            </p>
+          </section>
 
           <section className="space-y-3">
             <div className="flex items-baseline justify-between">

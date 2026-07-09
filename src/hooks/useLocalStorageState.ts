@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ApiKeys, DebateSettings, ModelConfig } from "@/lib/types";
+import type {
+  ApiKeys,
+  DebatePace,
+  DebateSettings,
+  ModelConfig,
+} from "@/lib/types";
 import {
+  DEFAULT_PACE,
   DEFAULT_WORD_LIMIT,
   MAX_ROUNDS,
   MAX_WORD_LIMIT,
@@ -27,8 +33,14 @@ const DEFAULT_SETTINGS: DebateSettings = {
   prompt: "",
   rounds: 2,
   wordLimit: DEFAULT_WORD_LIMIT,
+  pace: DEFAULT_PACE,
   demoMode: true,
 };
+
+function resolvePace(value: unknown): DebatePace {
+  if (value === "fast" || value === "normal" || value === "slow") return value;
+  return DEFAULT_PACE;
+}
 
 function safeParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
@@ -46,7 +58,7 @@ function migrateModelName(name: string | undefined, fallback: string): string {
 
 /** Migrate older settings that used charLimit. */
 function migrateSettings(
-  stored: DebateSettings & { charLimit?: number }
+  stored: DebateSettings & { charLimit?: number; pace?: DebatePace }
 ): DebateSettings {
   const wordLimit =
     typeof stored.wordLimit === "number"
@@ -65,6 +77,7 @@ function migrateSettings(
       MAX_WORD_LIMIT,
       Math.max(MIN_WORD_LIMIT, wordLimit)
     ),
+    pace: resolvePace(stored.pace),
     demoMode: stored.demoMode ?? true,
   };
 }

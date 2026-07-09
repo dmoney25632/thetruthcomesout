@@ -61,11 +61,16 @@ export interface SavedDebate {
   updatedAt: string;
 }
 
+/** How quickly models take turns and stream text */
+export type DebatePace = "fast" | "normal" | "slow";
+
 export interface DebateSettings {
   prompt: string;
   rounds: number;
   /** Soft max words per turn — models may use fewer */
   wordLimit: number;
+  /** Pause between speakers + stream speed */
+  pace: DebatePace;
   /** When true, force lowest-cost model IDs for each provider */
   demoMode: boolean;
 }
@@ -116,6 +121,49 @@ export const MAX_ROUNDS = 10;
 export const MIN_WORD_LIMIT = 20;
 export const MAX_WORD_LIMIT = 2000;
 export const DEFAULT_WORD_LIMIT = 150;
+export const DEFAULT_PACE: DebatePace = "normal";
+
+/** Client-side theatrical delays for each pace preset */
+export const PACE_TIMING: Record<
+  DebatePace,
+  {
+    label: string;
+    description: string;
+    /** Pause after typing indicator, before API call */
+    preTurnMs: number;
+    /** Pause after a model finishes, before the next speaker */
+    betweenSpeakerMs: number;
+    /** Pause between rounds */
+    betweenRoundMs: number;
+    /** Multiplier on per-word stream delay (0 = instant) */
+    streamMultiplier: number;
+  }
+> = {
+  fast: {
+    label: "Fast",
+    description: "Quick turns, snappy stream",
+    preTurnMs: 200,
+    betweenSpeakerMs: 400,
+    betweenRoundMs: 500,
+    streamMultiplier: 0.35,
+  },
+  normal: {
+    label: "Normal",
+    description: "Readable pace between models",
+    preTurnMs: 1200,
+    betweenSpeakerMs: 1800,
+    betweenRoundMs: 2200,
+    streamMultiplier: 1,
+  },
+  slow: {
+    label: "Slow",
+    description: "Longer pauses to follow along",
+    preTurnMs: 2000,
+    betweenSpeakerMs: 3500,
+    betweenRoundMs: 4000,
+    streamMultiplier: 1.75,
+  },
+};
 /** Cap local debate library so localStorage stays healthy */
 export const MAX_SAVED_DEBATES = 20;
 export const STORAGE_KEYS = {

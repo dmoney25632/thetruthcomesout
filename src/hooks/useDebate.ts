@@ -4,16 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ApiKeys,
   DebateMessage,
+  DebatePace,
   DebateSettings,
   ModelConfig,
   SavedDebate,
   StreamEvent,
 } from "@/lib/types";
 import {
+  DEFAULT_PACE,
   DEFAULT_WORD_LIMIT,
   MAX_ROUNDS,
   MAX_WORD_LIMIT,
   MIN_WORD_LIMIT,
+  PACE_TIMING,
 } from "@/lib/types";
 import { shuffle, sleep } from "@/lib/utils";
 import {
@@ -39,25 +42,46 @@ function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/** Slow the visible stream so readers can keep up. */
+/**
+ * Slow the visible stream so readers can keep up.
+ * Preserves leading whitespace so provider chunks like " world" stay intact.
+ */
 async function pacedToken(
   text: string,
   onToken: (text: string) => void,
-  shouldStop: () => boolean
+  shouldStop: () => boolean,
+  streamMultiplier: number
 ) {
-  const parts = text.match(/\S+\s*/g) ?? [text];
+  if (!text || shouldStop()) return;
+
+  if (streamMultiplier <= 0) {
+    onToken(text);
+    return;
+  }
+
+  // Keep leading whitespace as its own piece so it isn't dropped.
+  const leading = text.match(/^\s+/)?.[0] ?? "";
+  const rest = leading ? text.slice(leading.length) : text;
+  const wordParts = rest.match(/\S+\s*/g) ?? (rest ? [rest] : []);
+  const parts = leading ? [leading, ...wordParts] : wordParts;
+
   for (const part of parts) {
     if (shouldStop()) return;
     onToken(part);
-    const delay = Math.min(90, Math.max(28, part.length * 6));
-    await sleep(delay);
+    if (!part.trim()) continue; // don't delay on pure whitespace
+    const delay = Math.min(
+      90,
+      Math.max(28, part.length * 6)
+    ) * streamMultiplier;
+    if (delay > 0) await sleep(delay);
   }
 }
 
 async function readSseTurn(
   res: Response,
   onToken: (text: string) => void,
-  shouldStop: () => boolean
+  shouldStop: () => boolean,
+  streamMultiplier: number
 ): Promise<{ content: string; error?: string; errorCode?: string }> {
   if (!res.body) {
     const data = await res.json();
@@ -106,7 +130,8 @@ async function readSseTurn(
             content += piece;
             onToken(piece);
           },
-          shouldStop
+          shouldStop,
+          streamMultiplier
         );
       } else if (event.type === "done") {
         if (event.content) content = event.content;
@@ -297,6 +322,7 @@ export function useDebate() {
       startRound: number;
       endRound: number;
       wordLimit: number;
+      pace: DebatePace;
       demoMode: boolean;
       apiKeys: ApiKeys;
       apiHistory: ApiHistory;
@@ -304,8 +330,17 @@ export function useDebate() {
       signal: AbortSignal;
     }) => {
       let { apiHistory, transcript } = opts;
-      const { speakers, startRound, endRound, wordLimit, demoMode, apiKeys, signal } =
-        opts;
+      const {
+        speakers,
+        startRound,
+        endRound,
+        wordLimit,
+        pace,
+        demoMode,
+        apiKeys,
+        signal,
+      } = opts;
+      const timing = PACE_TIMING[pace] ?? PACE_TIMING[DEFAULT_PACE];
 
       for (let round = startRound; round <= endRound; round++) {
         setCurrentRound(round);
@@ -333,7 +368,7 @@ export function useDebate() {
           transcript = [...transcript, typingPlaceholder];
           setMessages(transcript);
 
-          await sleep(1200);
+          if (timing.preTurnMs > 0) await sleep(timing.preTurnMs);
           if (abortRef.current) break;
 
           const modelId = demoMode
@@ -376,7 +411,8 @@ export function useDebate() {
                     )
                   );
                 },
-                () => abortRef.current
+                () => abortRef.current,
+                timing.streamMultiplier
               );
 
               if (result.error) {
@@ -456,14 +492,18 @@ export function useDebate() {
             setTotalTokensUsed((t) => t + Math.ceil(turnContent.length / 4));
           }
 
-          if (!abortRef.current) {
-            await sleep(1800);
+          if (!abortRef.current && timing.betweenSpeakerMs > 0) {
+            await sleep(timing.betweenSpeakerMs);
           }
         }
         if (abortRef.current) break;
 
-        if (round < endRound && !abortRef.current) {
-          await sleep(2200);
+        if (
+          round < endRound &&
+          !abortRef.current &&
+          timing.betweenRoundMs > 0
+        ) {
+          await sleep(timing.betweenRoundMs);
         }
       }
 
@@ -493,6 +533,7 @@ export function useDebate() {
         MAX_WORD_LIMIT,
         Math.max(MIN_WORD_LIMIT, settings.wordLimit)
       );
+      const pace = settings.pace ?? DEFAULT_PACE;
       const shuffled = shuffle(enabled);
       abortRef.current = false;
       const controller = new AbortController();
@@ -537,6 +578,7 @@ export function useDebate() {
           startRound: 1,
           endRound: rounds,
           wordLimit,
+          pace,
           demoMode: settings.demoMode,
           apiKeys,
           apiHistory,
@@ -595,6 +637,7 @@ export function useDebate() {
         MAX_WORD_LIMIT,
         Math.max(MIN_WORD_LIMIT, settings.wordLimit)
       );
+      const pace = settings.pace ?? DEFAULT_PACE;
 
       // Prefer prior speaking order when models still match
       const byLabel = new Map(enabled.map((m) => [m.label, m]));
@@ -656,6 +699,7 @@ export function useDebate() {
           startRound,
           endRound,
           wordLimit,
+          pace,
           demoMode: settings.demoMode,
           apiKeys,
           apiHistory,
